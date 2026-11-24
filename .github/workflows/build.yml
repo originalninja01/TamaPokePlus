@@ -1,0 +1,119 @@
+# Builds TamaPoke Plus for both boards on every push (and by hand from the
+# Actions tab). The firmware files are attached to each run as "artifacts";
+# pushing a tag like v1.18-plus4 also publishes them as a GitHub Release.
+#
+#   ESP32-S3 (Waveshare ESP32-S3-Touch-AMOLED-1.75): TamaPokePlus-esp32s3.bin
+#       one merged image: flash it at address 0x0 (web flasher or esptool)
+#   RP2350 (Waveshare RP2350-Touch-AMOLED-1.75):     TamaPokePlus-rp2350.uf2
+#       hold BOOT, plug in, drag onto the RP2350 drive
+#   Both: TamaPokePlus-sdcard.zip, the "mons" folder for the microSD card
+
+name: Build firmware
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write  # for the release on tags
+
+env:
+  GFX_LIB: "GFX Library for Arduino@1.6.9"
+  SENSOR_LIB: "SensorLib@0.5.1"
+  XPOWERS_LIB: "XPowersLib@0.3.3"
+  U8G2_LIB: "U8g2@2.37.1"
+
+jobs:
+  tests:
+    name: Game logic tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the tests (AddressSanitizer + UBSan)
+        working-directory: TamaPokePlus/test
+        run: make asan
+
+  esp32s3:
+    name: ESP32-S3 firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install the ESP32 core and libraries
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+          arduino-cli lib install "$GFX_LIB" "$SENSOR_LIB" "$XPOWERS_LIB" "$U8G2_LIB"
+          arduino-cli core list
+      - name: Compile
+        run: |
+          arduino-cli compile \
+            --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB" \
+            --warnings default --export-binaries --output-dir out TamaPokePlus
+          ls -la out
+          mkdir -p dist
+          cp out/TamaPokePlus.ino.merged.bin dist/TamaPokePlus-esp32s3.bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TamaPokePlus-esp32s3
+          path: dist/TamaPokePlus-esp32s3.bin
+
+  rp2350:
+    name: RP2350 firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install the RP2350 core and libraries
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config add board_manager.additional_urls https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
+          arduino-cli core update-index
+          arduino-cli core install rp2040:rp2040@6.3.2
+          arduino-cli lib install "$GFX_LIB" "$SENSOR_LIB" "$XPOWERS_LIB" "$U8G2_LIB"
+      - name: Compile
+        run: |
+          arduino-cli compile \
+            --fqbn "rp2040:rp2040:generic_rp2350:flash=16777216_2097152,usbstack=picosdk" \
+            --warnings default --export-binaries --output-dir out TamaPokePlus
+          ls -la out
+          mkdir -p dist
+          cp out/TamaPokePlus.ino.uf2 dist/TamaPokePlus-rp2350.uf2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TamaPokePlus-rp2350
+          path: dist/TamaPokePlus-rp2350.uf2
+
+  sdcard:
+    name: SD card sprites
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Zip the mons folder
+        run: cd sdcard && zip -qr9 ../TamaPokePlus-sdcard.zip mons
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TamaPokePlus-sdcard
+          path: TamaPokePlus-sdcard.zip
+
+  release:
+    name: Publish release (tags only)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [tests, esp32s3, rp2350, sdcard]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/TamaPokePlus-esp32s3.bin
+            dist/TamaPokePlus-rp2350.uf2
+            dist/TamaPokePlus-sdcard.zip
