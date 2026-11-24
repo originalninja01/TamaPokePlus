@@ -24,7 +24,7 @@ env:
   GFX_LIB: "GFX Library for Arduino@1.6.9"
   SENSOR_LIB: "SensorLib@0.5.1"
   XPOWERS_LIB: "XPowersLib@0.3.3"
-  U8G2_LIB: "U8g2@2.37.1"
+  U8G2_LIB: "U8g2"
 
 jobs:
   tests:
@@ -47,7 +47,8 @@ jobs:
           arduino-cli config init --overwrite
           arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
           arduino-cli core update-index
-          arduino-cli core install esp32:esp32
+          # 3.x, the line the original TamaPoke targets (4.0 is a new major version)
+          arduino-cli core install esp32:esp32@3.3.13 || arduino-cli core install esp32:esp32@3.3.7
           arduino-cli lib install "$GFX_LIB" "$SENSOR_LIB" "$XPOWERS_LIB" "$U8G2_LIB"
           arduino-cli core list
       - name: Compile
